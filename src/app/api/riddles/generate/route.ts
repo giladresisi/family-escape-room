@@ -3,6 +3,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { generateRiddleTheme } from "@/lib/ai/generate-riddles";
 import { NextResponse } from "next/server";
 
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   const supabase = await createClient();
 
