@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { clientDb } from "@/lib/firebase/client";
+import {
+  doc,
+  getDoc,
+  collection,
+  query,
+  where,
+  orderBy,
+  getDocs,
+} from "firebase/firestore";
 import { Match, Player } from "@/lib/types/match";
 import { MatchRiddle, PlayerNote } from "@/lib/types/riddle";
 import { useRealtimeMatch } from "@/hooks/use-realtime-match";
@@ -29,57 +38,53 @@ export default function MatchPage({
   const [starting, setStarting] = useState(false);
   const [playerId, setPlayerId] = useState<string | null>(null);
 
-  // Load initial data
   useEffect(() => {
     const loadData = async () => {
-      const supabase = createClient();
-
-      // Get stored player ID
       const storedPlayerId = localStorage.getItem(`player_${matchId}`);
       setPlayerId(storedPlayerId);
 
-      // Fetch match
-      const { data: match, error: matchError } = await supabase
-        .from("matches")
-        .select("*")
-        .eq("id", matchId)
-        .single();
-
-      if (matchError || !match) {
+      const matchSnap = await getDoc(doc(clientDb(), "matches", matchId));
+      if (!matchSnap.exists()) {
         setError("Match not found");
         setLoading(false);
         return;
       }
+      setInitialMatch({ id: matchSnap.id, ...matchSnap.data() } as Match);
 
-      setInitialMatch(match);
+      const playersSnap = await getDocs(
+        query(
+          collection(clientDb(), "players"),
+          where("match_id", "==", matchId),
+          orderBy("joined_at")
+        )
+      );
+      setInitialPlayers(
+        playersSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Player)
+      );
 
-      // Fetch players
-      const { data: players } = await supabase
-        .from("players")
-        .select("*")
-        .eq("match_id", matchId)
-        .order("joined_at", { ascending: true });
+      const riddlesSnap = await getDocs(
+        query(
+          collection(clientDb(), "match_riddles"),
+          where("match_id", "==", matchId),
+          orderBy("sort_order")
+        )
+      );
+      const matchRiddles = riddlesSnap.docs.map(
+        (d) => ({ id: d.id, ...d.data() }) as MatchRiddle
+      );
+      setInitialRiddles(matchRiddles);
 
-      setInitialPlayers(players || []);
-
-      // Fetch match riddles with riddle details
-      const { data: matchRiddles } = await supabase
-        .from("match_riddles")
-        .select("*, riddle:riddles(*)")
-        .eq("match_id", matchId)
-        .order("riddle(sort_order)", { ascending: true });
-
-      setInitialRiddles(matchRiddles || []);
-
-      // Fetch notes
-      if (matchRiddles && matchRiddles.length > 0) {
+      if (matchRiddles.length > 0) {
         const matchRiddleIds = matchRiddles.map((mr) => mr.id);
-        const { data: notes } = await supabase
-          .from("player_notes")
-          .select("*")
-          .in("match_riddle_id", matchRiddleIds);
-
-        setInitialNotes(notes || []);
+        const notesSnap = await getDocs(
+          query(
+            collection(clientDb(), "player_notes"),
+            where("match_riddle_id", "in", matchRiddleIds)
+          )
+        );
+        setInitialNotes(
+          notesSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as PlayerNote)
+        );
       }
 
       setLoading(false);
@@ -88,16 +93,13 @@ export default function MatchPage({
     loadData();
   }, [matchId]);
 
-  // Realtime subscriptions
   const match = useRealtimeMatch(matchId, initialMatch);
   const players = useRealtimePlayers(matchId, initialPlayers);
   const riddles = useRealtimeRiddles(matchId, initialRiddles);
   const matchRiddleIds = riddles.filter((r) => r.is_visible).map((r) => r.id);
   const [notes] = useRealtimeNotes(matchRiddleIds, initialNotes);
 
-  const isCreator = players.some(
-    (p) => p.id === playerId && p.is_creator
-  );
+  const isCreator = players.some((p) => p.id === playerId && p.is_creator);
 
   const handleStartGame = async () => {
     setStarting(true);
@@ -142,7 +144,6 @@ export default function MatchPage({
 
   return (
     <div className="min-h-screen">
-      {/* Header */}
       <header className="sticky top-0 z-50 border-b border-surface-light bg-background/80 backdrop-blur-lg">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-4">
@@ -163,7 +164,6 @@ export default function MatchPage({
         </div>
       )}
 
-      {/* Match content based on status */}
       {match.status === "waiting" && (
         <Lobby
           code={match.code}

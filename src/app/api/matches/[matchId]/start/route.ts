@@ -1,35 +1,23 @@
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { adminDb, getUserFromRequest } from "@/lib/firebase/admin";
 import { NextResponse } from "next/server";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ matchId: string }> }
 ) {
   const { matchId } = await params;
-  const supabase = await createClient();
-  const admin = createAdminClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+  const user = await getUserFromRequest(request);
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Verify the user is the match creator
-  const { data: match } = await admin
-    .from("matches")
-    .select("*")
-    .eq("id", matchId)
-    .single();
-
-  if (!match) {
+  const matchSnap = await adminDb().collection("matches").doc(matchId).get();
+  if (!matchSnap.exists) {
     return NextResponse.json({ error: "Match not found" }, { status: 404 });
   }
+  const match = matchSnap.data()!;
 
-  if (match.creator_id !== user.id) {
+  if (match.creator_id !== user.uid) {
     return NextResponse.json(
       { error: "Only the match creator can start the game" },
       { status: 403 }
@@ -43,20 +31,12 @@ export async function POST(
     );
   }
 
-  // Start the match
-  const { data: updatedMatch, error } = await admin
-    .from("matches")
-    .update({
-      status: "playing",
-      started_at: new Date().toISOString(),
-    })
-    .eq("id", matchId)
-    .select()
-    .single();
+  const startedAt = new Date().toISOString();
+  await adminDb().collection("matches").doc(matchId).update({
+    status: "playing",
+    started_at: startedAt,
+  });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
+  const updatedMatch = { id: matchId, ...match, status: "playing", started_at: startedAt };
   return NextResponse.json({ match: updatedMatch });
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { NOTES_DEBOUNCE_MS } from "@/lib/constants";
 
 interface PlayerNoteEditorProps {
@@ -30,18 +29,15 @@ export default function PlayerNoteEditor({
 
   const saveNote = useCallback(
     async (text: string) => {
-      const supabase = createClient();
-      await supabase.from("player_notes").upsert(
-        {
-          match_riddle_id: matchRiddleId,
-          player_id: playerId,
+      await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchRiddleId,
+          playerId,
           content: text,
-          updated_at: new Date().toISOString(),
-        },
-        {
-          onConflict: "match_riddle_id,player_id",
-        }
-      );
+        }),
+      });
     },
     [matchRiddleId, playerId]
   );

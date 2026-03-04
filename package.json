@@ -10,8 +10,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "@supabase/ssr": "^0.8.0",
-    "@supabase/supabase-js": "^2.98.0",
+    "firebase": "^11.0.0",
+    "firebase-admin": "^13.0.0",
     "nanoid": "^3.3.11",
     "next": "16.1.6",
     "react": "19.2.3",

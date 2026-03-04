@@ -1,22 +1,33 @@
 "use client";
 
-import { createClient } from "@/lib/supabase/client";
-import { useSearchParams } from "next/navigation";
+import { clientAuth } from "@/lib/firebase/client";
+import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 function LoginContent() {
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect") || "/create";
   const error = searchParams.get("error");
+  const router = useRouter();
 
   const handleGoogleLogin = async () => {
-    const supabase = createClient();
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=${redirect}`,
-      },
-    });
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(clientAuth(), provider);
+      const idToken = await result.user.getIdToken();
+
+      await fetch("/api/auth/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken }),
+      });
+
+      router.push(redirect);
+    } catch (err) {
+      console.error("Login failed:", err);
+      router.push("/auth/login?error=auth_failed");
+    }
   };
 
   return (

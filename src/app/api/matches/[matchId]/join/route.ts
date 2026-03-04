@@ -1,4 +1,4 @@
-import { createAdminClient } from "@/lib/supabase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 import { NextResponse } from "next/server";
 
 export async function POST(
@@ -6,8 +6,6 @@ export async function POST(
   { params }: { params: Promise<{ matchId: string }> }
 ) {
   const { matchId } = await params;
-  const admin = createAdminClient();
-
   const { displayName } = await request.json();
 
   if (!displayName || displayName.trim().length === 0) {
@@ -17,16 +15,11 @@ export async function POST(
     );
   }
 
-  // Check match exists and is in waiting state
-  const { data: match, error: matchError } = await admin
-    .from("matches")
-    .select("*")
-    .eq("id", matchId)
-    .single();
-
-  if (matchError || !match) {
+  const matchSnap = await adminDb().collection("matches").doc(matchId).get();
+  if (!matchSnap.exists) {
     return NextResponse.json({ error: "Match not found" }, { status: 404 });
   }
+  const match = matchSnap.data()!;
 
   if (match.status !== "waiting") {
     return NextResponse.json(
@@ -35,35 +28,31 @@ export async function POST(
     );
   }
 
-  // Check if display name is already taken in this match
-  const { data: existingPlayer } = await admin
-    .from("players")
-    .select("id")
-    .eq("match_id", matchId)
-    .eq("display_name", displayName.trim())
-    .single();
+  // Check if display name is already taken
+  const existingSnap = await adminDb()
+    .collection("players")
+    .where("match_id", "==", matchId)
+    .where("display_name", "==", displayName.trim())
+    .limit(1)
+    .get();
 
-  if (existingPlayer) {
+  if (!existingSnap.empty) {
     return NextResponse.json(
       { error: "This name is already taken in this match" },
       { status: 409 }
     );
   }
 
-  // Create player
-  const { data: player, error: playerError } = await admin
-    .from("players")
-    .insert({
-      match_id: matchId,
-      display_name: displayName.trim(),
-      is_creator: false,
-    })
-    .select()
-    .single();
-
-  if (playerError) {
-    return NextResponse.json({ error: playerError.message }, { status: 500 });
-  }
+  const playerRef = adminDb().collection("players").doc();
+  const playerData = {
+    match_id: matchId,
+    user_id: null,
+    display_name: displayName.trim(),
+    is_creator: false,
+    joined_at: new Date().toISOString(),
+  };
+  await playerRef.set(playerData);
+  const player = { id: playerRef.id, ...playerData };
 
   return NextResponse.json({ player, matchId });
 }

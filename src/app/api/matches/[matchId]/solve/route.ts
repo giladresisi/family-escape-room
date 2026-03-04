@@ -1,4 +1,4 @@
-import { createAdminClient } from "@/lib/supabase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 import { NextResponse } from "next/server";
 
 export async function POST(
@@ -6,8 +6,6 @@ export async function POST(
   { params }: { params: Promise<{ matchId: string }> }
 ) {
   const { matchId } = await params;
-  const admin = createAdminClient();
-
   const { matchRiddleId, answer, playerId } = await request.json();
 
   if (!matchRiddleId || !answer || !playerId) {
@@ -17,34 +15,24 @@ export async function POST(
     );
   }
 
-  // Verify match is playing
-  const { data: match } = await admin
-    .from("matches")
-    .select("*")
-    .eq("id", matchId)
-    .single();
-
-  if (!match || match.status !== "playing") {
+  const matchSnap = await adminDb().collection("matches").doc(matchId).get();
+  if (!matchSnap.exists || matchSnap.data()!.status !== "playing") {
     return NextResponse.json(
       { error: "Match is not in progress" },
       { status: 400 }
     );
   }
 
-  // Get the match riddle with its template riddle
-  const { data: matchRiddle } = await admin
-    .from("match_riddles")
-    .select("*, riddle:riddles(*)")
-    .eq("id", matchRiddleId)
-    .eq("match_id", matchId)
-    .single();
+  const mrSnap = await adminDb()
+    .collection("match_riddles")
+    .doc(matchRiddleId)
+    .get();
 
-  if (!matchRiddle) {
-    return NextResponse.json(
-      { error: "Riddle not found" },
-      { status: 404 }
-    );
+  if (!mrSnap.exists || mrSnap.data()!.match_id !== matchId) {
+    return NextResponse.json({ error: "Riddle not found" }, { status: 404 });
   }
+
+  const matchRiddle = mrSnap.data()!;
 
   if (matchRiddle.is_solved) {
     return NextResponse.json(
@@ -53,7 +41,6 @@ export async function POST(
     );
   }
 
-  // Check answer (case-insensitive, trimmed)
   const riddle = matchRiddle.riddle;
   const isCorrect =
     answer.trim().toLowerCase() === riddle.answer.trim().toLowerCase();
@@ -63,44 +50,38 @@ export async function POST(
   }
 
   // Mark riddle as solved
-  await admin
-    .from("match_riddles")
-    .update({
-      is_solved: true,
-      solved_by: playerId,
-      solved_at: new Date().toISOString(),
-    })
-    .eq("id", matchRiddleId);
+  await adminDb().collection("match_riddles").doc(matchRiddleId).update({
+    is_solved: true,
+    solved_by: playerId,
+    solved_at: new Date().toISOString(),
+  });
 
-  // Unlock dependent riddles
-  const { data: dependentRiddles } = await admin
-    .from("riddles")
-    .select("id")
-    .eq("depends_on_id", riddle.id);
+  // Unlock dependent match_riddles
+  const dependentsSnap = await adminDb()
+    .collection("match_riddles")
+    .where("match_id", "==", matchId)
+    .where("riddle.depends_on_id", "==", riddle.id)
+    .get();
 
-  if (dependentRiddles && dependentRiddles.length > 0) {
-    const dependentRiddleIds = dependentRiddles.map((r) => r.id);
-    await admin
-      .from("match_riddles")
-      .update({ is_visible: true })
-      .eq("match_id", matchId)
-      .in("riddle_id", dependentRiddleIds);
+  if (!dependentsSnap.empty) {
+    const batch = adminDb().batch();
+    dependentsSnap.docs.forEach((doc) => {
+      batch.update(doc.ref, { is_visible: true });
+    });
+    await batch.commit();
   }
 
   // Check if this was the final riddle
   if (riddle.is_final) {
-    await admin
-      .from("matches")
-      .update({
-        status: "finished",
-        finished_at: new Date().toISOString(),
-      })
-      .eq("id", matchId);
+    await adminDb().collection("matches").doc(matchId).update({
+      status: "finished",
+      finished_at: new Date().toISOString(),
+    });
   }
 
   return NextResponse.json({
     correct: true,
     isFinal: riddle.is_final,
-    unlockedCount: dependentRiddles?.length || 0,
+    unlockedCount: dependentsSnap.size,
   });
 }

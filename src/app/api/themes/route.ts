@@ -1,17 +1,12 @@
-import { createAdminClient } from "@/lib/supabase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  const supabase = createAdminClient();
+  const snap = await adminDb()
+    .collection("riddle_themes")
+    .orderBy("created_at")
+    .get();
 
-  const { data: themes, error } = await supabase
-    .from("riddle_themes")
-    .select("*")
-    .order("created_at", { ascending: true });
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
+  const themes = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   return NextResponse.json({ themes });
 }

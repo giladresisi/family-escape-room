@@ -2,7 +2,8 @@
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { clientDb } from "@/lib/firebase/client";
+import { collection, query, where, limit, getDocs } from "firebase/firestore";
 
 export default function JoinPage({
   params,
@@ -23,20 +24,26 @@ export default function JoinPage({
 
   useEffect(() => {
     const fetchMatch = async () => {
-      const supabase = createClient();
-      const { data: match } = await supabase
-        .from("matches")
-        .select("id, status, theme:riddle_themes(name)")
-        .eq("code", code.toUpperCase())
-        .single();
+      const snap = await getDocs(
+        query(
+          collection(clientDb(), "matches"),
+          where("code", "==", code.toUpperCase()),
+          limit(1)
+        )
+      );
 
-      if (!match) {
+      if (snap.empty) {
         setError("Room not found. Check the code and try again.");
         setLoading(false);
         return;
       }
 
-      const theme = match.theme as unknown as { name: string } | null;
+      const matchDoc = snap.docs[0];
+      const match = { id: matchDoc.id, ...matchDoc.data() } as {
+        id: string;
+        status: string;
+        theme_name: string;
+      };
 
       if (match.status !== "waiting") {
         setError("This room has already started. You can no longer join.");
@@ -47,7 +54,7 @@ export default function JoinPage({
       setMatchInfo({
         id: match.id,
         status: match.status,
-        themeName: theme?.name || "Unknown Theme",
+        themeName: match.theme_name || "Unknown Theme",
       });
       setLoading(false);
     };
@@ -116,7 +123,10 @@ export default function JoinPage({
             Join Escape Room
           </h1>
           <p className="text-foreground/60">
-            Theme: <span className="font-medium text-foreground">{matchInfo?.themeName}</span>
+            Theme:{" "}
+            <span className="font-medium text-foreground">
+              {matchInfo?.themeName}
+            </span>
           </p>
           <p className="mt-1 text-sm text-foreground/40">
             Room Code: <span className="font-mono">{code.toUpperCase()}</span>

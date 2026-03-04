@@ -1,23 +1,16 @@
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { adminDb, getUserFromRequest } from "@/lib/firebase/admin";
 import { generateRiddleTheme } from "@/lib/ai/generate-riddles";
 import { NextResponse } from "next/server";
 
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+  const user = await getUserFromRequest(request);
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { prompt } = await request.json();
-
   if (!prompt || prompt.trim().length === 0) {
     return NextResponse.json(
       { error: "Theme description is required" },
@@ -27,54 +20,44 @@ export async function POST(request: Request) {
 
   try {
     const generatedTheme = await generateRiddleTheme(prompt.trim());
-    const admin = createAdminClient();
+    const now = new Date().toISOString();
 
     // Create theme
-    const { data: theme, error: themeError } = await admin
-      .from("riddle_themes")
-      .insert({
-        name: generatedTheme.name,
-        description: generatedTheme.description,
-        is_ai: true,
-      })
-      .select()
-      .single();
-
-    if (themeError || !theme) {
-      return NextResponse.json(
-        { error: "Failed to save theme" },
-        { status: 500 }
-      );
-    }
+    const themeRef = adminDb().collection("riddle_themes").doc();
+    const themeData = {
+      name: generatedTheme.name,
+      description: generatedTheme.description,
+      image_url: null,
+      is_ai: true,
+      created_at: now,
+    };
+    await themeRef.set(themeData);
+    const theme = { id: themeRef.id, ...themeData };
 
     // Insert riddles, resolving depends_on_index to actual IDs
     const riddleIdMap: Record<number, string> = {};
 
-    for (const riddle of generatedTheme.riddles) {
+    for (let i = 0; i < generatedTheme.riddles.length; i++) {
+      const riddle = generatedTheme.riddles[i];
       const dependsOnId =
         riddle.depends_on_index !== null
-          ? riddleIdMap[riddle.depends_on_index]
+          ? (riddleIdMap[riddle.depends_on_index] ?? null)
           : null;
 
-      const { data: insertedRiddle } = await admin
-        .from("riddles")
-        .insert({
-          theme_id: theme.id,
-          title: riddle.title,
-          body: riddle.body,
-          hint: riddle.hint,
-          answer: riddle.answer,
-          sort_order: riddle.sort_order,
-          depends_on_id: dependsOnId || null,
-          flavor_text: riddle.flavor_text,
-          is_final: riddle.is_final,
-        })
-        .select()
-        .single();
-
-      if (insertedRiddle) {
-        riddleIdMap[generatedTheme.riddles.indexOf(riddle)] = insertedRiddle.id;
-      }
+      const riddleRef = adminDb().collection("riddles").doc();
+      await riddleRef.set({
+        theme_id: themeRef.id,
+        title: riddle.title,
+        body: riddle.body,
+        hint: riddle.hint ?? null,
+        answer: riddle.answer,
+        sort_order: riddle.sort_order,
+        depends_on_id: dependsOnId,
+        flavor_text: riddle.flavor_text ?? null,
+        is_final: riddle.is_final ?? false,
+        created_at: now,
+      });
+      riddleIdMap[i] = riddleRef.id;
     }
 
     return NextResponse.json({ theme });

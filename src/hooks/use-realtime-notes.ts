@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { clientDb } from "@/lib/firebase/client";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { PlayerNote } from "@/lib/types/riddle";
-import { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 export function useRealtimeNotes(
   matchRiddleIds: string[],
@@ -14,43 +14,19 @@ export function useRealtimeNotes(
   useEffect(() => {
     if (matchRiddleIds.length === 0) return;
 
-    const supabase = createClient();
+    const q = query(
+      collection(clientDb(), "player_notes"),
+      where("match_riddle_id", "in", matchRiddleIds)
+    );
 
-    const channel = supabase
-      .channel(`notes:${matchRiddleIds.join(",")}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "player_notes",
-        },
-        (payload: RealtimePostgresChangesPayload<PlayerNote>) => {
-          if (payload.eventType === "INSERT") {
-            const newNote = payload.new as PlayerNote;
-            if (matchRiddleIds.includes(newNote.match_riddle_id)) {
-              setNotes((prev) => {
-                const exists = prev.some((n) => n.id === newNote.id);
-                if (exists) return prev;
-                return [...prev, newNote];
-              });
-            }
-          } else if (payload.eventType === "UPDATE") {
-            const updatedNote = payload.new as PlayerNote;
-            setNotes((prev) =>
-              prev.map((n) =>
-                n.id === updatedNote.id ? { ...n, ...updatedNote } : n
-              )
-            );
-          }
-        }
-      )
-      .subscribe();
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setNotes(
+        snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as PlayerNote)
+      );
+    });
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [matchRiddleIds]);
+    return unsubscribe;
+  }, [matchRiddleIds.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return [notes, setNotes] as const;
 }

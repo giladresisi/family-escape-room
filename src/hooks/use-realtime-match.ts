@@ -1,37 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { clientDb } from "@/lib/firebase/client";
+import { doc, onSnapshot } from "firebase/firestore";
 import { Match } from "@/lib/types/match";
-import { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 export function useRealtimeMatch(matchId: string, initial: Match | null) {
   const [match, setMatch] = useState<Match | null>(initial);
 
   useEffect(() => {
-    const supabase = createClient();
-
-    const channel = supabase
-      .channel(`match:${matchId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "matches",
-          filter: `id=eq.${matchId}`,
-        },
-        (payload: RealtimePostgresChangesPayload<Match>) => {
-          if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
-            setMatch(payload.new as Match);
-          }
+    const unsubscribe = onSnapshot(
+      doc(clientDb(), "matches", matchId),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          setMatch({ id: snapshot.id, ...snapshot.data() } as Match);
         }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+      }
+    );
+    return unsubscribe;
   }, [matchId]);
 
   return match;
