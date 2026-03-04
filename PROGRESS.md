@@ -1,16 +1,19 @@
 # Progress
 
-## Status: Firebase migration complete — needs Firebase project setup before running
+## Status: Needs Firebase project setup before running
 
-The codebase has been fully migrated from Supabase to Firebase (Auth + Firestore).
 All code is ready. The following setup steps are required before the app will work.
 
 ---
 
 ## TODO: Firebase Setup Checklist
 
-### 1. Create a Firebase project
+### 1. Create a Firebase project and update Google Cloud redirect URI
 - Go to https://console.firebase.google.com and create a new project
+- Once created, note the **Project ID** (found in Project Settings → General)
+- Then go to console.cloud.google.com → APIs & Services → Credentials → your OAuth 2.0 Client ID
+- Under **Authorized redirect URIs**, replace the old redirect URI with:
+  `https://{your-project-id}.firebaseapp.com/__/auth/handler`
 
 ### 2. Enable Google Auth
 - Firebase Console → Authentication → Sign-in method → Enable Google
@@ -50,9 +53,8 @@ These are required for the queries to work. Create them in Firebase Console → 
 | `matches`      | `code` ASC                    |
 
 ### 7. Seed initial riddle themes
-The old Supabase SQL seed is no longer applicable. Options:
-- Use the in-app AI generation feature (Create page → "Generate a custom theme with AI")
-- Or write a seed script that calls `adminDb().collection("riddle_themes").doc().set({...})`
+Use the in-app AI generation feature (Create page → "Generate a custom theme with AI"),
+or write a seed script that calls `adminDb().collection("riddle_themes").doc().set({...})`.
 
 ### 8. Configure Firestore security rules (before going to production)
 Current test-mode rules allow all reads/writes. Replace with proper rules, e.g.:
@@ -71,10 +73,3 @@ service cloud.firestore {
 ### 9. Add authorized domain for Google Auth
 - Firebase Console → Authentication → Settings → Authorized domains
 - Add your production domain (localhost is already included by default)
-
----
-
-## Already Done
-- Full Supabase → Firebase migration (Auth, Firestore, realtime)
-- All API routes, hooks, pages, components updated
-- Build passes (`npm run build`)
